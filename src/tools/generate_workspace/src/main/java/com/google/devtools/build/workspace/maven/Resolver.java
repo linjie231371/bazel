@@ -16,6 +16,7 @@ package com.google.devtools.build.workspace.maven;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 
@@ -39,13 +40,14 @@ import org.apache.maven.model.plugin.DefaultPluginConfigurationExpander;
 import org.apache.maven.model.profile.DefaultProfileSelector;
 import org.apache.maven.model.resolution.UnresolvableModelException;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-
-import javax.annotation.Nullable;
+import java.util.Set;
 
 /**
  * Resolves Maven dependencies.
@@ -60,6 +62,7 @@ public class Resolver {
   private final List<String> headers;
   // Mapping of maven_jar name to Rule.
   private final Map<String, Rule> deps;
+  private Set<Rule> rootDependencies;
 
   public Resolver(EventHandler handler) {
     this.handler = handler;
@@ -72,6 +75,7 @@ public class Resolver {
         .setDependencyManagementImporter(new DefaultDependencyManagementImporter())
         .setDependencyManagementInjector(new DefaultDependencyManagementInjector());
     this.modelResolver = new DefaultModelResolver();
+    this.rootDependencies = Sets.newTreeSet();
   }
 
   /**
@@ -89,15 +93,18 @@ public class Resolver {
    */
   public void writeBuild(PrintStream outputStream) {
     writeHeader(outputStream);
-    outputStream.println("java_library(");
-    outputStream.println("    name = \"transitive-deps\",");
-    outputStream.println("    visibility = [\"//visibility:public\"],");
-    outputStream.println("    exports = [");
-    for (Rule rule : deps.values()) {
+    for (Rule rule : rootDependencies) {
+      outputStream.println("java_library(");
+      outputStream.println("    name = \"" + rule.name() + "\",");
+      outputStream.println("    visibility = [\"//visibility:public\"],");
+      outputStream.println("    exports = [");
       outputStream.println("        \"@" + rule.name() + "//jar\",");
+      for (Rule r : rule.getDependencies()) {
+          outputStream.println("        \"@" + r.name() + "//jar\",");
+      }
+      outputStream.println("    ],");
+      outputStream.println(")");
     }
-    outputStream.println("    ],");
-    outputStream.println(")");
   }
 
   private void writeHeader(PrintStream outputStream) {
@@ -131,7 +138,7 @@ public class Resolver {
     // First resolve the model source locations.
     resolveSourceLocations(pomSource);
     // Next, fully resolve the models.
-    resolveEffectiveModel(pomSource);
+    resolveEffectiveModel(pomSource, Sets.<String>newHashSet(), null);
   }
 
   /**
@@ -140,7 +147,7 @@ public class Resolver {
    * @return the model.
    */
   @Nullable
-  public Model resolveEffectiveModel(ModelSource modelSource) {
+  public Model resolveEffectiveModel(ModelSource modelSource, Set<String> exclusions, Rule parent) {
     DefaultModelBuildingRequest request = new DefaultModelBuildingRequest();
     request.setModelResolver(modelResolver);
     request.setModelSource(modelSource);
@@ -165,18 +172,31 @@ public class Resolver {
       if (dependency.isOptional()) {
         continue;
       }
+      if (exclusions.contains(dependency.getGroupId() + ":" + dependency.getArtifactId())) {
+        continue;
+      }
       try {
         Rule artifactRule = new Rule(dependency);
+        HashSet<String> localDepExclusions = new HashSet<>(exclusions);
+        localDepExclusions.addAll(artifactRule.getExclusions());
+
         boolean isNewDependency = addArtifact(artifactRule, model.toString());
         if (isNewDependency) {
           ModelSource depModelSource = modelResolver.resolveModel(
               dependency.getGroupId(), dependency.getArtifactId(), dependency.getVersion());
           if (depModelSource != null) {
             artifactRule.setRepository(depModelSource.getLocation(), handler);
-            resolveEffectiveModel(depModelSource);
+            resolveEffectiveModel(depModelSource, localDepExclusions, artifactRule);
           } else {
             handler.handle(Event.error("Could not get a model for " + dependency));
           }
+        }
+
+        if (parent != null) {
+          parent.addDependency(artifactRule);
+          parent.getDependencies().addAll(artifactRule.getDependencies());
+        } else {
+          rootDependencies.add(artifactRule);
         }
       } catch (UnresolvableModelException | Rule.InvalidRuleException e) {
         handler.handle(Event.error("Could not resolve dependency " + dependency.getGroupId()
@@ -258,5 +278,9 @@ public class Resolver {
     deps.put(artifactName, dependency);
     dependency.addParent(parent);
     return true;
+  }
+
+  public void addRootDependency(Rule rule) {
+    rootDependencies.add(rule);
   }
 }
