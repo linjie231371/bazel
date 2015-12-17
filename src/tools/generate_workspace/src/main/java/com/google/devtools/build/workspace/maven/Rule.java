@@ -36,8 +36,14 @@ import java.util.Set;
  * A struct representing the fields of maven_jar to be written to the WORKSPACE file.
  */
 public final class Rule implements Comparable<Rule> {
+  // test deps.
+  public static final String TEST_SCOPE = "test";
+  // exported deps.
+  public static final String COMPILE_SCOPE = "compile";
+
   private final Artifact artifact;
   private final Set<String> parents;
+  private boolean isTestScope;
   private String repository;
   private String sha1;
   private Set<String> exclusions;
@@ -52,6 +58,7 @@ public final class Rule implements Comparable<Rule> {
     this.parents = Sets.newHashSet();
     this.dependencies = Sets.newTreeSet();
     this.exclusions = Sets.newHashSet();
+    this.isTestScope = false;
   }
 
   public Rule(Dependency dependency) throws InvalidRuleException {
@@ -61,6 +68,11 @@ public final class Rule implements Comparable<Rule> {
     for (Exclusion exclusion : dependency.getExclusions()) {
       exclusions.add(String.format("%s:%s", exclusion.getGroupId(), exclusion.getArtifactId()));
     }
+    isTestScope = TEST_SCOPE.equalsIgnoreCase(dependency.getScope());
+  }
+
+  public boolean isTestScope() {
+    return this.isTestScope;
   }
 
   public void addParent(String parent) {
