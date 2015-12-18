@@ -52,6 +52,7 @@ import org.eclipse.aether.resolution.ArtifactResult;
 import java.io.IOException;
 import java.util.Map;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /**
@@ -66,11 +67,12 @@ public class MavenJarFunction extends HttpArchiveFunction {
   }
 
   @Override
+  @Nonnull
   protected byte[] getRuleSpecificMarkerData(Rule rule, Environment env)
       throws RepositoryFunctionException {
     MavenServerValue serverValue = getServer(rule, env);
     if (env.valuesMissing()) {
-      return null;
+      return new byte[]{};
     }
 
     return new Fingerprint()
