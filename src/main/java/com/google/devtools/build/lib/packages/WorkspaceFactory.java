@@ -58,7 +58,7 @@ import javax.annotation.Nullable;
  */
 public class WorkspaceFactory {
   public static final String BIND = "bind";
-  private static final Pattern LEGAL_WORKSPACE_NAME = Pattern.compile("^\\p{Alpha}\\w*$");
+  private static final Pattern LEGAL_WORKSPACE_NAME = Pattern.compile("^[a-zA-Z][-a-zA-Z0-9_.]*$");
 
   private final LegacyBuilder builder;
   
@@ -170,7 +170,7 @@ public class WorkspaceFactory {
   private static void checkWorkspaceName(String name, FuncallExpression ast) throws EvalException {
     Matcher matcher = LEGAL_WORKSPACE_NAME.matcher(name);
     if (!matcher.matches()) {
-      throw new EvalException(ast.getLocation(), name + " is not a legal workspace name");
+      throw new EvalException(ast.getLocation(), "\"" + name + "\" is not a legal workspace name");
     }
   }
 
