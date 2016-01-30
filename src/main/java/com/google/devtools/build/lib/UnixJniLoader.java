@@ -15,6 +15,10 @@
 package com.google.devtools.build.lib;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 /**
  * A class to load JNI dependencies for Bazel.
@@ -32,7 +36,37 @@ public class UnixJniLoader {
       if (toTest.exists()) {
         System.load(toTest.toString());
       } else {
-        throw ex;
+        InputStream libraryStream = null;
+        OutputStream tmpFileStream = null;
+        try {
+          libraryStream = UnixJniLoader.class.getClassLoader().getResourceAsStream(libunix);
+          File tmpFile = File.createTempFile("bazel", "libunix.so");
+          tmpFile.deleteOnExit();
+          tmpFileStream = new FileOutputStream(tmpFile.getAbsolutePath());
+
+          byte[] buffer = new byte[4096];
+          int read;
+          while ((read = libraryStream.read(buffer, 0, 4096)) > 0) {
+            tmpFileStream.write(buffer, 0, read);
+          }
+
+          System.load(tmpFile.toString());
+        } catch (IOException ie) {
+          throw ex;
+        } finally {
+          if (libraryStream != null) {
+            try {
+              libraryStream.close();
+            } catch (IOException e) {
+            }
+          }
+          if (tmpFileStream != null) {
+            try {
+              tmpFileStream.close();
+            } catch (IOException e) {
+            }
+          }
+        }
       }
     }
   }

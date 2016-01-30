@@ -60,7 +60,7 @@ import javax.annotation.Nullable;
  */
 public class WorkspaceFactory {
   public static final String BIND = "bind";
-  private static final Pattern LEGAL_WORKSPACE_NAME = Pattern.compile("^\\p{Alpha}\\w*$");
+  private static final Pattern LEGAL_WORKSPACE_NAME = Pattern.compile("^[a-zA-Z][-a-zA-Z0-9_.]*$");
 
   // List of static function added by #addWorkspaceFunctions. Used to trim them out from the
   // serialized list of variables bindings.

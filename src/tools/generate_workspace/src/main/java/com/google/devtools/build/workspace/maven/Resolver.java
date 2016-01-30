@@ -44,6 +44,7 @@ import org.apache.maven.model.resolution.UnresolvableModelException;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -51,6 +52,7 @@ import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -87,8 +89,6 @@ public class Resolver {
         + dependency.getVersion());
   }
   
-  private static final String COMPILE_SCOPE = "compile";
-
   private final EventHandler handler;
   private final DefaultModelBuilder modelBuilder;
   private final DefaultModelResolver modelResolver;
@@ -101,7 +101,7 @@ public class Resolver {
   public Resolver(EventHandler handler) {
     this.handler = handler;
     this.headers = Lists.newArrayList();
-    this.deps = Maps.newHashMap();
+    this.deps = Maps.newTreeMap();
     this.modelBuilder = new DefaultModelBuilderFactory().newInstance()
         .setProfileSelector(new DefaultProfileSelector())
         .setPluginConfigurationExpander(new DefaultPluginConfigurationExpander())
@@ -131,6 +131,9 @@ public class Resolver {
       outputStream.println("java_library(");
       outputStream.println("    name = \"" + rule.name() + "\",");
       outputStream.println("    visibility = [\"//visibility:public\"],");
+      if (rule.isTestScope()) {
+        outputStream.println("    testonly = 1,");
+      }
       outputStream.println("    exports = [");
       outputStream.println("        \"@" + rule.name() + "//jar\",");
       for (Rule r : rule.getDependencies()) {
@@ -144,6 +147,7 @@ public class Resolver {
 
   private void writeHeader(PrintStream outputStream) {
     outputStream.println("# The following dependencies were calculated from:");
+    Collections.sort(headers);
     for (String header : headers) {
       outputStream.println("# " + header);
     }
@@ -221,9 +225,13 @@ public class Resolver {
       modelResolver.addRepository(repo);
     }
 
-    for (Dependency dependency : model.getDependencies()) {
-      if (!dependency.getScope().equals(COMPILE_SCOPE)) {
-        continue;
+    for (org.apache.maven.model.Dependency dependency : model.getDependencies()) {
+      if (!Rule.COMPILE_SCOPE.equalsIgnoreCase(dependency.getScope())) {
+        // Skip test scope dependencies unless we have no parent rule. These
+        // are dependencies referenced in our parsed pom.xml file.
+        if (parent != null || !Rule.TEST_SCOPE.equalsIgnoreCase(dependency.getScope())) {
+          continue;
+        }
       }
       if (dependency.isOptional()) {
         continue;

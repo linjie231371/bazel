@@ -305,4 +305,85 @@ EOF
   assert_contains "artifact = \"xyz:b2:1.0\"," $(get_workspace_file)
 }
 
+# Takes: groupId, artifactId, and version.
+function make_artifact_busted_sha() {
+  local groupId=$1
+  local artifactId=$2
+  local version=$3
+  local sha_prefix=$4
+  local sha_suffix=$5
+
+  local pkg_dir=$m2/$groupId/$artifactId/$version
+  mkdir -p $pkg_dir
+  # Make the pom.xml.
+  cat > $pkg_dir/$artifactId-$version.pom <<EOF
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>$artifactId</groupId>
+  <artifactId>$artifactId</artifactId>
+  <version>$version</version>
+</project>
+EOF
+
+  # Make the jar with one class (we use the groupId for the classname).
+  cat > $TEST_TMPDIR/$groupId.java <<EOF
+public class $groupId {
+  public static void print() {
+    System.out.println("$artifactId");
+  }
+}
+EOF
+  local jar_path=$pkg_dir/$artifactId-$version.jar
+  ${bazel_javabase}/bin/javac $TEST_TMPDIR/$groupId.java
+  ${bazel_javabase}/bin/jar cf $jar_path $TEST_TMPDIR/$groupId.class
+
+  local sha1=$(shasum $jar_path | awk '{print $1}')
+  echo -n ${sha_prefix}${sha1}${sha_suffix} > $jar_path.sha1
+  echo $sha1
+}
+
+function test_busted_sha() {
+  # Create a maven repo
+  local glorp_sha1=$(make_artifact_busted_sha blorp glorp 1.2.3 'sha1(/blorp/glorp.jar)=' '')
+  local mlorp_sha1=$(make_artifact_busted_sha blorp mlorp 1.2.3 '' ' /blorp/mlorp.jar')
+
+  # Create a pom that references the artifacts.
+  cat > $TEST_TMPDIR/pom.xml <<EOF
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>my</groupId>
+  <artifactId>thing</artifactId>
+  <version>1.0</version>
+  <repositories>
+    <repository>
+      <id>my-repo1</id>
+      <name>a custom repo</name>
+      <url>http://localhost:$fileserver_port/</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>blorp</groupId>
+      <artifactId>glorp</artifactId>
+      <version>1.2.3</version>
+    </dependency>
+    <dependency>
+      <groupId>blorp</groupId>
+      <artifactId>mlorp</artifactId>
+      <version>1.2.3</version>
+    </dependency>
+  </dependencies>
+</project>
+EOF
+
+  generate_workspace --maven_project=$TEST_TMPDIR &> $TEST_log \
+    || fail "generating workspace failed"
+
+  cat $(cat $TEST_log | tail -n 2 | head -n 1) > ws
+
+  assert_contains "sha1 = \"$glorp_sha1\"," ws
+  assert_contains "sha1 = \"$mlorp_sha1\"," ws
+}
+
 run_suite "maven tests"

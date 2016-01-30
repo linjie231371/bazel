@@ -20,6 +20,8 @@ import com.google.devtools.build.lib.bazel.repository.MavenConnector;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 
+
+import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Exclusion;
 import org.eclipse.aether.artifact.Artifact;
 
@@ -31,20 +33,30 @@ import java.util.Set;
  * A struct representing the fields of maven_jar to be written to the WORKSPACE file.
  */
 public final class Rule implements Comparable<Rule> {
+  // test deps.
+  public static final String TEST_SCOPE = "test";
+  // exported deps.
+  public static final String COMPILE_SCOPE = "compile";
 
   private final Artifact artifact;
   private final Set<String> parents;
   private final Set<String> exclusions;
   private final Set<Rule> dependencies;
+  private boolean isTestScope;
   private String repository;
   private String sha1;
 
-  public Rule(Artifact artifact) {
-    this.artifact = artifact;
-    this.parents = Sets.newHashSet();
+  public Rule(String artifactStr) throws InvalidRuleException {
+    try {
+      this.artifact = new DefaultArtifact(artifactStr);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidRuleException(e.getMessage());
+    }
+    this.parents = Sets.newTreeSet();
     this.dependencies = Sets.newTreeSet();
     this.exclusions = Sets.newHashSet();
     this.repository = MavenConnector.MAVEN_CENTRAL_URL;
+    this.isTestScope = false;
   }
 
   public Rule(Artifact artifact, List<Exclusion> exclusions) {
@@ -54,6 +66,11 @@ public final class Rule implements Comparable<Rule> {
       String coord = String.format("%s:%s", exclusion.getGroupId(), exclusion.getArtifactId());
       this.exclusions.add(coord);
     }
+    isTestScope = TEST_SCOPE.equalsIgnoreCase(dependency.getScope());
+  }
+
+  public boolean isTestScope() {
+    return this.isTestScope;
   }
 
   public void addParent(String parent) {
@@ -120,6 +137,25 @@ public final class Rule implements Comparable<Rule> {
           + " attribute manually"));
     } else {
       this.repository = url.substring(0, uriStart);
+      String jarSha1Url = url.replaceAll("pom$", "jar.sha1");
+      try {
+        // Download the sha1 of the jar file from the repository.
+        HttpURLConnection connection = (HttpURLConnection) new URL(jarSha1Url).openConnection();
+        connection.setInstanceFollowRedirects(true);
+        connection.connect();
+        this.sha1 = CharStreams.toString(new InputStreamReader(connection.getInputStream())).trim();
+        if (this.sha1.contains(" ") || this.sha1.contains("=") || this.sha1.contains("\t")) {
+          // Sha1 is always represented with a 40 character hex string.
+          for (String part : this.sha1.split("[ =\t]")) {
+            if (part.matches("[0-9a-fA-F]{40}")) {
+              this.sha1 = part;
+              break;
+            }
+          }
+        }
+      } catch (IOException e) {
+        handler.handle(Event.warn("Failed to download the sha1 at " + jarSha1Url));
+      }
     }
   }
 
